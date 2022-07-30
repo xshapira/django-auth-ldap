@@ -100,7 +100,7 @@ class LDAPSearch:
         self.ldap = _LDAPConfig.get_ldap()
 
     def __repr__(self):
-        return "<{}: {}>".format(type(self).__name__, self.base_dn)
+        return f"<{type(self).__name__}: {self.base_dn}>"
 
     def search_with_additional_terms(self, term_dict, escape=True):
         """
@@ -113,9 +113,9 @@ class LDAPSearch:
         for name, value in term_dict.items():
             if escape:
                 value = self.ldap.filter.escape_filter_chars(value)
-            term_strings.append("({}={})".format(name, value))
+            term_strings.append(f"({name}={value})")
 
-        filterstr = "(&{})".format("".join(term_strings))
+        filterstr = f'(&{"".join(term_strings)})'
 
         return type(self)(self.base_dn, self.scope, filterstr, attrlist=self.attrlist)
 
@@ -125,7 +125,7 @@ class LDAPSearch:
         string. The caller is responsible for passing in a properly escaped
         string.
         """
-        filterstr = "(&{}{})".format(self.filterstr, filterstr)
+        filterstr = f"(&{self.filterstr}{filterstr})"
 
         return type(self)(self.base_dn, self.scope, filterstr, attrlist=self.attrlist)
 
@@ -150,10 +150,9 @@ class LDAPSearch:
         except ldap.LDAPError as e:
             results = []
             logger.error(
-                "search_s('{}', {}, '{}') raised {}".format(
-                    self.base_dn, self.scope, filterstr, pprint.pformat(e)
-                )
+                f"search_s('{self.base_dn}', {self.scope}, '{filterstr}') raised {pprint.pformat(e)}"
             )
+
 
         return self._process_results(results)
 
@@ -177,10 +176,9 @@ class LDAPSearch:
         except ldap.LDAPError as e:
             msgid = None
             logger.error(
-                "search('{}', {}, '{}') raised {}".format(
-                    self.base_dn, self.scope, filterstr, pprint.pformat(e)
-                )
+                f"search('{self.base_dn}', {self.scope}, '{filterstr}') raised {pprint.pformat(e)}"
             )
+
 
         return msgid
 
@@ -194,7 +192,7 @@ class LDAPSearch:
                 results = []
         except ldap.LDAPError as e:
             results = []
-            logger.error("result({}) raised {}".format(msgid, pprint.pformat(e)))
+            logger.error(f"result({msgid}) raised {pprint.pformat(e)}")
 
         return self._process_results(results)
 
@@ -234,14 +232,9 @@ class LDAPSearch:
 
         result_dns = [result[0] for result in results]
         logger.debug(
-            "search_s('{}', {}, '{}') returned {} objects: {}".format(
-                self.base_dn,
-                self.scope,
-                self.filterstr,
-                len(result_dns),
-                "; ".join(result_dns),
-            )
+            f"""search_s('{self.base_dn}', {self.scope}, '{self.filterstr}') returned {len(result_dns)} objects: {"; ".join(result_dns)}"""
         )
+
 
         return results
 
@@ -279,7 +272,7 @@ class LDAPSearchUnion:
         for search, msgid in zip(self.searches, msgids):
             if msgid is not None:
                 result = search._results(connection, msgid)
-                results.update(dict(result))
+                results |= dict(result)
 
         return results.items()
 
@@ -409,14 +402,10 @@ class PosixGroupType(LDAPGroupType):
 
             if "gidNumber" in ldap_user.attrs:
                 user_gid = ldap_user.attrs["gidNumber"][0]
-                filterstr = "(|(gidNumber={})(memberUid={}))".format(
-                    self.ldap.filter.escape_filter_chars(user_gid),
-                    self.ldap.filter.escape_filter_chars(user_uid),
-                )
+                filterstr = f"(|(gidNumber={self.ldap.filter.escape_filter_chars(user_gid)})(memberUid={self.ldap.filter.escape_filter_chars(user_uid)}))"
+
             else:
-                filterstr = "(memberUid={})".format(
-                    self.ldap.filter.escape_filter_chars(user_uid)
-                )
+                filterstr = f"(memberUid={self.ldap.filter.escape_filter_chars(user_uid)})"
 
             search = group_search.search_with_additional_term_string(filterstr)
             groups = search.execute(ldap_user.connection)
@@ -469,7 +458,7 @@ class MemberDNGroupType(LDAPGroupType):
         super().__init__(name_attr)
 
     def __repr__(self):
-        return "<{}: {}>".format(type(self).__name__, self.member_attr)
+        return f"<{type(self).__name__}: {self.member_attr}>"
 
     def user_groups(self, ldap_user, group_search):
         search = group_search.search_with_additional_terms(
@@ -515,12 +504,12 @@ class NestedMemberDNGroupType(LDAPGroupType):
         member_dn_set = {ldap_user.dn}  # Member DNs to search with next
         handled_dn_set = set()  # Member DNs that we've already searched with
 
-        while len(member_dn_set) > 0:
+        while member_dn_set:
             group_infos = self.find_groups_with_any_member(
                 member_dn_set, group_search, ldap_user.connection
             )
             new_group_info_map = {info[0]: info for info in group_infos}
-            group_info_map.update(new_group_info_map)
+            group_info_map |= new_group_info_map
             handled_dn_set.update(member_dn_set)
 
             # Get ready for the next iteration. To avoid cycles, we make sure
@@ -531,11 +520,12 @@ class NestedMemberDNGroupType(LDAPGroupType):
 
     def find_groups_with_any_member(self, member_dn_set, group_search, connection):
         terms = [
-            "({}={})".format(self.member_attr, self.ldap.filter.escape_filter_chars(dn))
+            f"({self.member_attr}={self.ldap.filter.escape_filter_chars(dn)})"
             for dn in member_dn_set
         ]
 
-        filterstr = "(|{})".format("".join(terms))
+
+        filterstr = f'(|{"".join(terms)})'
         search = group_search.search_with_additional_term_string(filterstr)
 
         return search.execute(connection)

@@ -149,12 +149,10 @@ class LDAPBackend:
 
         if password or self.settings.PERMIT_EMPTY_PASSWORD:
             ldap_user = _LDAPUser(self, username=username.strip(), request=request)
-            user = self.authenticate_ldap_user(ldap_user, password)
+            return self.authenticate_ldap_user(ldap_user, password)
         else:
-            logger.debug("Rejecting empty password for {}".format(username))
-            user = None
-
-        return user
+            logger.debug(f"Rejecting empty password for {username}")
+            return None
 
     def get_user(self, user_id):
         user = None
@@ -171,11 +169,10 @@ class LDAPBackend:
         return perm in self.get_all_permissions(user, obj)
 
     def has_module_perms(self, user, app_label):
-        for perm in self.get_all_permissions(user):
-            if perm[: perm.index(".")] == app_label:
-                return True
-
-        return False
+        return any(
+            perm[: perm.index(".")] == app_label
+            for perm in self.get_all_permissions(user)
+        )
 
     def get_all_permissions(self, user, obj=None):
         return self.get_group_permissions(user, obj)
@@ -184,12 +181,11 @@ class LDAPBackend:
         if not hasattr(user, "ldap_user") and self.settings.AUTHORIZE_ALL_USERS:
             _LDAPUser(self, user=user)  # This sets user.ldap_user
 
-        if hasattr(user, "ldap_user"):
-            permissions = user.ldap_user.get_group_permissions()
-        else:
-            permissions = set()
-
-        return permissions
+        return (
+            user.ldap_user.get_group_permissions()
+            if hasattr(user, "ldap_user")
+            else set()
+        )
 
     #
     # Bonus API: populate the Django user from LDAP without authenticating.
@@ -229,7 +225,7 @@ class LDAPBackend:
         else:
             query_field = model.USERNAME_FIELD
             query_value = username.lower()
-            lookup = "{}__iexact".format(query_field)
+            lookup = f"{query_field}__iexact"
 
         try:
             user = model.objects.get(**{lookup: query_value})
@@ -355,7 +351,7 @@ class _LDAPUser:
 
             user = self._user
         except self.AuthenticationFailed as e:
-            logger.debug("Authentication failed for {}: {}".format(self._username, e))
+            logger.debug(f"Authentication failed for {self._username}: {e}")
         except ldap.LDAPError as e:
             results = ldap_error.send(
                 type(self.backend),
@@ -366,12 +362,11 @@ class _LDAPUser:
             )
             if len(results) == 0:
                 logger.warning(
-                    "Caught LDAPError while authenticating {}: {}".format(
-                        self._username, pprint.pformat(e)
-                    )
+                    f"Caught LDAPError while authenticating {self._username}: {pprint.pformat(e)}"
                 )
+
         except Exception as e:
-            logger.warning("{} while authenticating {}".format(e, self._username))
+            logger.warning(f"{e} while authenticating {self._username}")
             raise
 
         return user
@@ -398,10 +393,9 @@ class _LDAPUser:
                     )
                     if len(results) == 0:
                         logger.warning(
-                            "Caught LDAPError loading group permissions: {}".format(
-                                pprint.pformat(e)
-                            )
+                            f"Caught LDAPError loading group permissions: {pprint.pformat(e)}"
                         )
+
 
         return self._group_permissions
 
@@ -428,12 +422,11 @@ class _LDAPUser:
             )
             if len(results) == 0:
                 logger.warning(
-                    "Caught LDAPError while authenticating {}: {}".format(
-                        self._username, pprint.pformat(e)
-                    )
+                    f"Caught LDAPError while authenticating {self._username}: {pprint.pformat(e)}"
                 )
+
         except Exception as e:
-            logger.warning("{} while authenticating {}".format(e, self._username))
+            logger.warning(f"{e} while authenticating {self._username}")
             raise
 
         return user
@@ -511,16 +504,13 @@ class _LDAPUser:
         """
         if self._using_simple_bind_mode():
             self._user_dn = self._construct_simple_user_dn()
+        elif self.settings.CACHE_TIMEOUT > 0:
+            cache_key = valid_cache_key(f"django_auth_ldap.user_dn.{self._username}")
+            self._user_dn = cache.get_or_set(
+                cache_key, self._search_for_user_dn, self.settings.CACHE_TIMEOUT
+            )
         else:
-            if self.settings.CACHE_TIMEOUT > 0:
-                cache_key = valid_cache_key(
-                    "django_auth_ldap.user_dn.{}".format(self._username)
-                )
-                self._user_dn = cache.get_or_set(
-                    cache_key, self._search_for_user_dn, self.settings.CACHE_TIMEOUT
-                )
-            else:
-                self._user_dn = self._search_for_user_dn()
+            self._user_dn = self._search_for_user_dn()
 
     def _using_simple_bind_mode(self):
         return self.settings.USER_DN_TEMPLATE is not None
@@ -583,8 +573,7 @@ class _LDAPUser:
         denied_group_dn = self.settings.DENY_GROUP
 
         if denied_group_dn is not None:
-            is_member = self._get_groups().is_member_of(denied_group_dn)
-            if is_member:
+            if is_member := self._get_groups().is_member_of(denied_group_dn):
                 raise self.AuthenticationFailed(
                     "user does not satisfy AUTH_LDAP_DENY_GROUP"
                 )
@@ -617,12 +606,12 @@ class _LDAPUser:
                     "user does not satisfy AUTH_LDAP_NO_NEW_USERS"
                 )
 
-            logger.debug("Creating Django user {}".format(username))
+            logger.debug(f"Creating Django user {username}")
             self._user.set_unusable_password()
             save_user = True
 
         if should_populate:
-            logger.debug("Populating Django user {}".format(username))
+            logger.debug(f"Populating Django user {username}")
             self._populate_user()
             save_user = True
 
@@ -652,11 +641,7 @@ class _LDAPUser:
             except (TypeError, LookupError):
                 # TypeError occurs when self.attrs is None as we were unable to
                 # load this user's attributes.
-                logger.warning(
-                    "{} does not have a value for the attribute {}".format(
-                        self.dn, attr
-                    )
-                )
+                logger.warning(f"{self.dn} does not have a value for the attribute {attr}")
             else:
                 setattr(self._user, field, value)
 
@@ -803,7 +788,7 @@ class _LDAPUser:
         perms = perms.values_list("content_type__app_label", "codename")
         perms = perms.order_by()
 
-        self._group_permissions = {"{}.{}".format(ct, name) for ct, name in perms}
+        self._group_permissions = {f"{ct}.{name}" for ct, name in perms}
 
     def _get_groups(self):
         """
@@ -931,10 +916,9 @@ class _LDAPUserGroups:
             is_member = group_dn in self.get_group_dns()
 
         logger.debug(
-            "{} is{}a member of {}".format(
-                self._ldap_user.dn, is_member and " " or " not ", group_dn
-            )
+            f'{self._ldap_user.dn} is{is_member and " " or " not "}a member of {group_dn}'
         )
+
 
         return is_member
 
@@ -978,9 +962,7 @@ class _LDAPUserGroups:
         DN for maximum compatibility.
         """
         dn = self._ldap_user.dn
-        return valid_cache_key(
-            "auth_ldap.{}.{}.{}".format(type(self).__name__, attr_name, dn)
-        )
+        return valid_cache_key(f"auth_ldap.{type(self).__name__}.{attr_name}.{dn}")
 
 
 class LDAPSettings:

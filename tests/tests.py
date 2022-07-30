@@ -358,12 +358,15 @@ class LDAPTest(TestCase):
     def test_convert_username(self):
         self._init_settings(USER_DN_TEMPLATE="uid=%(user)s,ou=people,o=test")
 
+
+
         class MyBackend(LDAPBackend):
             def ldap_to_django_username(self, username):
-                return "ldap_%s" % username
+                return f"ldap_{username}"
 
             def django_to_ldap_username(self, username):
                 return username[5:]
+
 
         backend = MyBackend()
         user_count = User.objects.count()
@@ -1127,7 +1130,7 @@ class LDAPTest(TestCase):
         bob_id = User.objects.create(username="bob").pk
 
         # Check permissions twice for each user
-        for i in range(2):
+        for _ in range(2):
             alice = backend.get_user(alice_id)
             self.assertEqual(
                 backend.get_group_permissions(alice),
@@ -1206,9 +1209,11 @@ class LDAPTest(TestCase):
         )
 
         backend = get_backend()
-        groups = {}
-        for name in ("mirror{}".format(i) for i in range(1, 5)):
-            groups[name] = Group.objects.create(name=name)
+        groups = {
+            name: Group.objects.create(name=name)
+            for name in (f"mirror{i}" for i in range(1, 5))
+        }
+
         alice = backend.populate_user("alice")
         alice.groups.set([groups["mirror2"], groups["mirror4"]])
 
@@ -1231,9 +1236,11 @@ class LDAPTest(TestCase):
         )
 
         backend = get_backend()
-        groups = {}
-        for name in ("mirror{}".format(i) for i in range(1, 5)):
-            groups[name] = Group.objects.create(name=name)
+        groups = {
+            name: Group.objects.create(name=name)
+            for name in (f"mirror{i}" for i in range(1, 5))
+        }
+
         alice = backend.populate_user("alice")
         alice.groups.set([groups["mirror1"], groups["mirror3"]])
 
@@ -1256,9 +1263,11 @@ class LDAPTest(TestCase):
         )
 
         backend = get_backend()
-        groups = {}
-        for name in ("mirror{}".format(i) for i in range(1, 5)):
-            groups[name] = Group.objects.create(name=name)
+        groups = {
+            name: Group.objects.create(name=name)
+            for name in (f"mirror{i}" for i in range(1, 5))
+        }
+
         alice = backend.populate_user("alice")
         alice.groups.set([groups["mirror2"], groups["mirror4"]])
 
@@ -1281,9 +1290,11 @@ class LDAPTest(TestCase):
         )
 
         backend = get_backend()
-        groups = {}
-        for name in ("mirror{}".format(i) for i in range(1, 5)):
-            groups[name] = Group.objects.create(name=name)
+        groups = {
+            name: Group.objects.create(name=name)
+            for name in (f"mirror{i}" for i in range(1, 5))
+        }
+
         alice = backend.populate_user("alice")
         alice.groups.set([groups["mirror1"], groups["mirror3"]])
 
@@ -1548,9 +1559,7 @@ class LDAPTest(TestCase):
 
     def _init_settings(self, **kwargs):
         kwargs.setdefault("SERVER_URI", self.server.ldap_uri)
-        settings = {}
-        for key, value in kwargs.items():
-            settings["AUTH_LDAP_%s" % key] = value
+        settings = {f"AUTH_LDAP_{key}": value for key, value in kwargs.items()}
         cm = override_settings(**settings)
         cm.enable()
         self.addCleanup(cm.disable)
